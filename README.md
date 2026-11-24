@@ -16,6 +16,35 @@ and maps them to the real IPs in an nftables table. Design and rationale: PLAN.m
 
 Needs CAP_NET_ADMIN on Linux. See the example config in PLAN.md.
 
+## Docker
+
+Image: `ghcr.io/alcroito/ts_router` (linux/amd64, linux/arm64).
+
+    docker run -d --name ts-router --network host --cap-add NET_ADMIN \
+        -v /srv/ts-router/config.toml:/etc/ts-router/config.toml:ro \
+        -v /srv/ts-router/state:/var/lib/ts-router \
+        ghcr.io/alcroito/ts_router:latest
+
+Compose:
+
+    services:
+      ts-router:
+        image: ghcr.io/alcroito/ts_router:latest
+        container_name: ts-router
+        network_mode: host
+        cap_add: [NET_ADMIN]
+        volumes:
+          - ./config.toml:/etc/ts-router/config.toml:ro
+          - ./state:/var/lib/ts-router
+        restart: unless-stopped
+        healthcheck:
+          test: ["CMD", "/ts-router", "health", "-config", "/etc/ts-router/config.toml"]
+          interval: 60s
+          timeout: 10s
+          retries: 3
+
+Set `state_file = "/var/lib/ts-router/state.json"` in the config so state lands in the mounted directory.
+
 ## Test
 
 Unit tests (any OS):

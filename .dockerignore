@@ -1,0 +1,13 @@
+.git
+.github
+.gitignore
+ts-router
+*.test
+*.out
+.idea
+.vscode
+*.swp
+.DS_Store
+PLAN.md
+README.md
+test/Dockerfile
