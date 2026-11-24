@@ -63,6 +63,9 @@ func serve(path string) error {
 		return err
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if len(cfg.Allow) == 0 {
+		log.Warn("allow_sources is empty: every query is forwarded without a synthetic IP")
+	}
 	s := server.New(cfg, store, nft.New(cfg.Interface, cfg.Prefix),
 		&upstream.Client{Servers: cfg.Upstreams}, log)
 	if err := s.Init(); err != nil {
