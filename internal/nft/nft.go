@@ -25,11 +25,12 @@ type Backend interface {
 
 // Fake is an in-memory Backend for tests.
 type Fake struct {
-	mu      sync.Mutex
-	M       map[netip.Addr]netip.Addr
-	Writes  []string
-	SetupOK bool
-	FailSet error
+	mu       sync.Mutex
+	M        map[netip.Addr]netip.Addr
+	Writes   []string
+	SetupOK  bool
+	FailSet  error
+	FailList error
 }
 
 func NewFake() *Fake { return &Fake{M: map[netip.Addr]netip.Addr{}} }
@@ -68,6 +69,9 @@ func (f *Fake) Delete(s netip.Addr) error {
 func (f *Fake) List() (map[netip.Addr]netip.Addr, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.FailList != nil {
+		return nil, f.FailList
+	}
 	out := map[netip.Addr]netip.Addr{}
 	for k, v := range f.M {
 		out[k] = v

@@ -20,6 +20,7 @@ import (
 const (
 	activeWindow = 24 * time.Hour
 	refreshAhead = 10 * time.Second
+	repairEvery  = 30 * time.Second
 )
 
 type Server struct {
@@ -40,13 +41,17 @@ func New(cfg *config.Config, store *state.Store, b nft.Backend, ex upstream.Exch
 
 // Init repopulates the nftables map from state; it must run before serving.
 func (s *Server) Init() error {
+	return s.NFT.Setup(s.desired())
+}
+
+func (s *Server) desired() map[netip.Addr]netip.Addr {
 	m := map[netip.Addr]netip.Addr{}
 	for _, e := range s.Store.Entries() {
 		if len(e.Real) > 0 {
 			m[e.Synthetic] = e.Real[0]
 		}
 	}
-	return s.NFT.Setup(m)
+	return m
 }
 
 func (s *Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
@@ -122,6 +127,7 @@ func (s *Server) handleA(ctx context.Context, req *dns.Msg, name string) *dns.Ms
 	case err != nil:
 		s.Log.Warn("upstream lookup failed", "name", name, "err", err)
 		if have && len(e.Real) > 0 {
+			s.Store.SetExpiry(name, now.Add(upstream.MinTTL))
 			return s.answer(req, e.Synthetic)
 		}
 		return rcode(req, dns.RcodeServerFailure)
@@ -196,6 +202,7 @@ func (s *Server) Refresh(ctx context.Context) {
 		}
 		res, err := s.res.LookupA(ctx, e.Name)
 		if err != nil || res.NXDomain || len(res.IPs) == 0 {
+			s.Store.SetExpiry(e.Name, now.Add(upstream.MinTTL))
 			continue
 		}
 		if _, err := s.apply(e.Name, res, now); err != nil {
@@ -208,10 +215,39 @@ func (s *Server) Refresh(ctx context.Context) {
 func (s *Server) Collect() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, e := range s.Store.GC(s.Now(), time.Duration(s.Cfg.GCAfter)) {
+	gone, err := s.Store.GC(s.Now(), time.Duration(s.Cfg.GCAfter))
+	if err != nil {
+		s.Log.Error("gc save state", "err", err)
+	}
+	for _, e := range gone {
 		if err := s.NFT.Delete(e.Synthetic); err != nil {
 			s.Log.Error("gc delete", "name", e.Name, "err", err)
 		}
 		s.Log.Info("expired", "name", e.Name, "synthetic", e.Synthetic)
+	}
+}
+
+// Repair restores the nftables table and map elements if something outside ts-router removed or changed them.
+func (s *Server) Repair() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	want := s.desired()
+	live, err := s.NFT.List()
+	if err != nil {
+		s.Log.Warn("nftables table or map missing, recreating", "err", err)
+		if err := s.NFT.Setup(want); err != nil {
+			s.Log.Error("repair setup", "err", err)
+		}
+		return
+	}
+	for _, syn := range nft.SortedKeys(want) {
+		if live[syn] == want[syn] {
+			continue
+		}
+		if err := s.NFT.Set(syn, want[syn]); err != nil {
+			s.Log.Error("repair set", "synthetic", syn, "err", err)
+			continue
+		}
+		s.Log.Warn("repaired map element", "synthetic", syn, "real", want[syn])
 	}
 }

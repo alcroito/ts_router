@@ -222,6 +222,72 @@ func TestServeStale(t *testing.T) {
 	}
 }
 
+func TestStaleWindowBacksOffUpstream(t *testing.T) {
+	e := newEnv(t)
+	e.query(allowed, "a.example.test", dns.TypeA)
+	e.up.fail = true
+	e.now = e.now.Add(10 * time.Minute)
+	e.query(allowed, "a.example.test", dns.TypeA)
+	n := e.up.count()
+	e.now = e.now.Add(29 * time.Second)
+	r := e.query(allowed, "a.example.test", dns.TypeA)
+	if r.Rcode != dns.RcodeSuccess || e.up.count() != n {
+		t.Fatalf("upstream hit inside the stale window: %d -> %d", n, e.up.count())
+	}
+	e.now = e.now.Add(2 * time.Second)
+	r = e.query(allowed, "a.example.test", dns.TypeA)
+	if r.Rcode != dns.RcodeSuccess || e.up.count() == n {
+		t.Fatalf("no retry after the window: %d", e.up.count())
+	}
+}
+
+func TestRefreshBacksOffAfterFailure(t *testing.T) {
+	e := newEnv(t)
+	e.query(allowed, "a.example.test", dns.TypeA)
+	e.up.fail = true
+	e.now = e.now.Add(295 * time.Second)
+	e.srv.Refresh(context.Background())
+	n := e.up.count()
+	e.now = e.now.Add(5 * time.Second)
+	e.srv.Refresh(context.Background())
+	if e.up.count() != n {
+		t.Fatal("refresh retried within the back-off window")
+	}
+}
+
+func TestRepairRecreatesAfterListFailure(t *testing.T) {
+	e := newEnv(t)
+	e.query(allowed, "a.example.test", dns.TypeA)
+	e.nft.FailList = errors.New("no such table")
+	e.nft.M = map[netip.Addr]netip.Addr{}
+	before := len(e.nft.Log())
+	e.srv.Repair()
+	if got := e.nft.Log()[before:]; len(got) != 1 || got[0] != "setup" {
+		t.Fatalf("writes: %v", got)
+	}
+	if e.nft.M[netip.MustParseAddr("198.18.0.1")] != netip.MustParseAddr("1.2.3.4") {
+		t.Fatalf("map %v", e.nft.M)
+	}
+}
+
+func TestRepairRestoresMissingAndWrongElements(t *testing.T) {
+	e := newEnv(t)
+	e.query(allowed, "a.example.test", dns.TypeA)
+	e.query(allowed, "example.test", dns.TypeA)
+	s1, s2 := netip.MustParseAddr("198.18.0.1"), netip.MustParseAddr("198.18.0.2")
+	delete(e.nft.M, s1)
+	e.nft.M[s2] = netip.MustParseAddr("9.9.9.9")
+	e.srv.Repair()
+	if e.nft.M[s1] != netip.MustParseAddr("1.2.3.4") || e.nft.M[s2] != netip.MustParseAddr("1.2.3.9") {
+		t.Fatalf("map %v", e.nft.M)
+	}
+	before := len(e.nft.Log())
+	e.srv.Repair()
+	if len(e.nft.Log()) != before {
+		t.Fatal("repair wrote to a healthy map")
+	}
+}
+
 func TestRealIPChangeUpdatesMapKeepsSynthetic(t *testing.T) {
 	e := newEnv(t)
 	e.query(allowed, "a.example.test", dns.TypeA)

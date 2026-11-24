@@ -56,6 +56,8 @@ func (s *Server) background(ctx context.Context) {
 	refresh := time.NewTicker(5 * time.Second)
 	flush := time.NewTicker(30 * time.Second)
 	gc := time.NewTicker(10 * time.Minute)
+	repair := time.NewTicker(repairEvery)
+	defer repair.Stop()
 	defer refresh.Stop()
 	defer flush.Stop()
 	defer gc.Stop()
@@ -73,6 +75,8 @@ func (s *Server) background(ctx context.Context) {
 			}
 		case <-gc.C:
 			s.Collect()
+		case <-repair.C:
+			s.Repair()
 		}
 	}
 }

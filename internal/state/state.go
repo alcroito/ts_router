@@ -177,8 +177,19 @@ func (s *Store) Touch(name string, now time.Time) {
 	}
 }
 
+// SetExpiry moves the real-IP expiry without rewriting the file.
+func (s *Store) SetExpiry(name string, expiry time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.entries[name]; ok {
+		e.RealExpiry = expiry
+		s.dirty = true
+	}
+}
+
 // GC drops entries not queried for longer than after and returns them.
-func (s *Store) GC(now time.Time, after time.Duration) []Entry {
+// The entries are dropped from memory even if saving fails.
+func (s *Store) GC(now time.Time, after time.Duration) ([]Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var gone []Entry
@@ -191,9 +202,9 @@ func (s *Store) GC(now time.Time, after time.Duration) []Entry {
 		}
 	}
 	if len(gone) > 0 {
-		_ = s.save()
+		return gone, s.save()
 	}
-	return gone
+	return gone, nil
 }
 
 func (s *Store) Entries() []Entry {

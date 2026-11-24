@@ -81,8 +81,8 @@ func TestWrapAround(t *testing.T) {
 	for _, n := range []string{"c", "d", "e", "f"} {
 		s.Touch(n, t0.Add(100*time.Hour))
 	}
-	gone := s.GC(t0.Add(100*time.Hour), time.Hour)
-	if len(gone) != 1 || gone[0].Name != "b" {
+	gone, err := s.GC(t0.Add(100*time.Hour), time.Hour)
+	if err != nil || len(gone) != 1 || gone[0].Name != "b" {
 		t.Fatalf("gc: %+v", gone)
 	}
 	g, err := s.Allocate("g", t0.Add(100*time.Hour+FreeCooldown))
@@ -109,12 +109,26 @@ func TestFreedNotReusedDuringCooldown(t *testing.T) {
 	}
 }
 
+func TestGCReturnsSaveError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "d")
+	s := open(t, filepath.Join(dir, "s.json"), "198.18.0.0/15")
+	s.Allocate("old", t0)
+	os.RemoveAll(dir)
+	if err := os.WriteFile(dir, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := s.GC(t0.Add(time.Hour), time.Minute)
+	if err == nil || len(gone) != 1 {
+		t.Fatalf("gone %v err %v", gone, err)
+	}
+}
+
 func TestGCKeepsRecent(t *testing.T) {
 	s := open(t, filepath.Join(t.TempDir(), "s.json"), "198.18.0.0/15")
 	s.Allocate("old", t0)
 	s.Allocate("new", t0.Add(29*24*time.Hour))
-	gone := s.GC(t0.Add(31*24*time.Hour), 30*24*time.Hour)
-	if len(gone) != 1 || gone[0].Name != "old" {
+	gone, err := s.GC(t0.Add(31*24*time.Hour), 30*24*time.Hour)
+	if err != nil || len(gone) != 1 || gone[0].Name != "old" {
 		t.Fatalf("gc: %+v", gone)
 	}
 	if _, ok := s.Get("new"); !ok {

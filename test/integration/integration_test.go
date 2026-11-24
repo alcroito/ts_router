@@ -269,6 +269,17 @@ name = "test.example"
 		}
 	})
 
+	t.Run("repairs a removed table", func(t *testing.T) {
+		sh(t, inNS(nsRouter, "nft", "delete", "table", "inet", "ts_router")...)
+		if out, err := helper(t, nsClient, "tcp", "TSR_ADDR="+syn+":7000"); err == nil {
+			t.Fatalf("flow works without the table: %s", out)
+		}
+		waitFor(t, "table repair", 45*time.Second, func() bool {
+			out, err := helper(t, nsClient, "tcp", "TSR_ADDR="+syn+":7000")
+			return err == nil && out == "src=10.100.2.1 dst=10.100.2.2"
+		})
+	})
+
 	t.Run("real IP change", func(t *testing.T) {
 		type flow struct {
 			out string
